@@ -400,6 +400,9 @@ export function configVars(text) {
 // Services that run this app: built from the repo, or the poshtomat image. Third-party
 // services (a database, a proxy) have their own variables and are not checked.
 const isAppService = (svc) => Boolean(svc?.build) || /poshtomat/i.test(String(svc?.image ?? ""));
+// An image from a variable (${APP_IMAGE}) can be the app under a neutral name: if no app service is
+// recognised, these must not let the rule switch itself off silently.
+const imageFromVariable = (svc) => !svc?.build && String(svc?.image ?? "").includes("${");
 
 export const RULES = [
   {
@@ -564,9 +567,16 @@ export const RULES = [
       const problem = composeProblem(compose);
       if (problem) return problem;
       const expected = configVars(readFileSync(configPath, "utf8"));
-      if (!expected.size) return skip(`${APP_CONFIG} не читає жодної змінної через env.*`);
-      const apps = services(compose).filter(([, svc]) => isAppService(svc));
-      if (!apps.length) return skip("у compose немає сервісів застосунку (build: або образ poshtomat)");
+      // config.js exists, so finding nothing means the rule no longer understands how it reads
+      // variables (destructuring, process.env[name]) — not that there is nothing to check.
+      if (!expected.size) return fail(`${APP_CONFIG} існує, але правило не знайшло в ньому жодного env.NAME / env["NAME"] — читайте змінні так або оновіть configVars()`);
+      const all = services(compose);
+      const apps = all.filter(([, svc]) => isAppService(svc));
+      if (!apps.length) {
+        const unknown = all.filter(([, svc]) => imageFromVariable(svc)).map(([name, svc]) => `${name} (${svc.image})`);
+        if (unknown.length) return fail(`не можу визначити сервіси застосунку: образ зі змінної в ${unknown.join(", ")} — назвіть змінну з poshtomat або додайте build:`);
+        return skip("у compose немає сервісів застосунку (build: або образ poshtomat)");
+      }
 
       const problems = [];
       const provided = new Set();

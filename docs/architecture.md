@@ -99,7 +99,11 @@ flowchart LR
 
 - **API → SMS-провайдер:** `main:deploy/compose.yaml:18-20` передає API налаштування SMS, але
   `app/src/server.js` не створює SMS-клієнта.
-- **API ↔ Worker:** прямого зв'язку немає, вони спільно працюють лише через БД.
+- **API ↔ Worker:** прямого зв'язку немає. У коді репо спільної БД теж немає: API і worker
+  кожен створюють свій `createPool` із власним сховищем у пам'яті (`app/src/server.js:91`,
+  `app/src/worker.js:43`, `app/src/db.js:63`), тож worker не бачить посилок, записаних API.
+  Спільна PostgreSQL, через яку вони працюють разом, — це опис production-середовища
+  (`app/src/db.js:1-2`, `main:deploy/compose.yaml:2`), а не наявна модель коду.
 - **SMS-провайдер → API:** маршруту для вебхука немає (`app/src/server.js:36-52`).
 
 ## Що AI вигадав / пропустив

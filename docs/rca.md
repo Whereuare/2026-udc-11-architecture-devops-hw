@@ -52,18 +52,18 @@
 
 | # | Твердження | Команда (з кореня репо) | Результат |
 |---|---|---|---|
-| 1 | Реліз перейменував змінну пулу в обох сервісах | `grep -c 'DB_POOL_SIZE' incident/changes/v1.8.0.diff` | `2` |
+| 1 | Реліз перейменував змінну пулу в обох сервісах: прибрав `DB_POOL_MAX` і додав `DB_POOL_SIZE` в `api` і `worker` | `awk '/^ +(api\|worker):/{s=$1} /^[-+] +DB_POOL/{print s, $1, $2, $3}' incident/changes/v1.8.0.diff` | `api: - DB_POOL_MAX: "20"`, `api: + DB_POOL_SIZE: "20"`, `worker: - DB_POOL_MAX: "20"`, `worker: + DB_POOL_SIZE: "20"` (сервіс, рядок diff) |
 | 2 | Код у релізі не змінено, він читає стару назву | `grep -c 'config.js' incident/changes/v1.8.0.diff; grep -c 'DB_POOL_MAX' app/src/config.js; grep -c 'DB_POOL_SIZE' app/src/config.js` | `0`, `1`, `0` |
 | 3 | З новою назвою код бере пул на 4 | `cd app && node --input-type=module -e 'import {loadConfig as l} from "./src/config.js"; console.log(l({DB_POOL_MAX:"20"}).dbPoolMax, l({DB_POOL_SIZE:"20"}).dbPoolMax)'` | `20 4` |
 | 4 | Під час інциденту пул стояв рівно на 4, і запити чекали | `awk -F, 'NR>1{t=substr($1,12,5); if(t>="14:02"&&t<"14:47"){if(n==0\|\|$5<a)a=$5; if($5>b)b=$5; if($6>w)w=$6; n++}} END{print n,a,b,w+0}' incident/metrics/2026-10-14.csv` | `45 4 4 23` (хвилин, мін., макс., макс. очікувань) |
-| 5 | Того самого часу напередодні пул не впирався в ліміт | та сама команда для `incident/baseline/metrics-2026-10-13.csv` | `45 10 13 0` |
+| 5 | Того самого часу напередодні пул не впирався в ліміт | `awk -F, 'NR>1{t=substr($1,12,5); if(t>="14:02"&&t<"14:47"){if(n==0\|\|$5<a)a=$5; if($5>b)b=$5; if($6>w)w=$6; n++}} END{print n,a,b,w+0}' incident/baseline/metrics-2026-10-13.csv` | `45 10 13 0` (хвилин, мін., макс., макс. очікувань) |
 | 6 | Навантаження не змінилось, але p95 і помилки зросли | `awk -F, 'NR>1{t=substr($1,12,5); if(t>="14:02"&&t<"14:47"){r+=$2;p+=$3;e+=$4;n++}} END{printf "%.1f %.0f %.3f\n",r/n,p/n,e/n}' incident/metrics/2026-10-14.csv` | `11.8 4476 0.107` (rps, p95, частка помилок) |
-| 7 | Те саме напередодні | та сама команда для `incident/baseline/metrics-2026-10-13.csv` | `11.8 236 0.002` |
+| 7 | Те саме напередодні: навантаження таке саме, p95 і помилки в нормі | `awk -F, 'NR>1{t=substr($1,12,5); if(t>="14:02"&&t<"14:47"){r+=$2;p+=$3;e+=$4;n++}} END{printf "%.1f %.0f %.3f\n",r/n,p/n,e/n}' incident/baseline/metrics-2026-10-13.csv` | `11.8 236 0.002` (rps, p95, частка помилок) |
 | 8 | Усі 503 мають одну причину, і напередодні їх не було | `grep -c '"status":503' incident/logs/api-2026-10-14.jsonl; grep '"status":503' incident/logs/api-2026-10-14.jsonl \| grep -c 'db pool wait timeout'; grep -c '"status":503' incident/baseline/api-2026-10-13.jsonl` | `3380`, `3380`, `0` |
 | 9 | Пул змінюється разом із версією, а не з перезапуском | `awk -F, 'NR>1{t=substr($1,12,5); if(t=="14:01"\|\|t=="14:02"\|\|t=="14:21"\|\|t=="14:47"\|\|t=="14:48")print t,$3,$5,$6}' incident/metrics/2026-10-14.csv` | `14:01 245 12 0`, `14:02 945 4 4`, `14:21 4588 4 20`, `14:47 618 14 0`, `14:48 296 11 0` (час, p95, пул, очікування) |
 | 10 | 503 охоплюють рівно вікно v1.8.0 | `grep '"status":503' incident/logs/api-2026-10-14.jsonl \| cut -c8-30 \| sed -n '1p;$p'` | `2026-10-14T14:02:07.172`, `2026-10-14T14:46:58.204` |
 | 11 | Вплив за маршрутами | `grep '"status":503' incident/logs/api-2026-10-14.jsonl \| grep -o '"path":"[^"]*"' \| sort \| uniq -c` | `/admin/parcels` 144, `/parcels` 650, `/pickup` 2586 |
-| 12 | Найдовший 503 відповідає кількості звернень до пулу: 1 на `/parcels`, 3 на `/pickup` (`app/src/parcels.js:61-67`) | `grep '"status":503' incident/logs/api-2026-10-14.jsonl \| grep '"path":"/pickup"' \| grep -o '"ms":[0-9]*' \| cut -d: -f2 \| sort -n \| tail -1` | `5607` (для `/parcels` така сама команда дає `2008`) |
+| 12 | Найдовший 503 відповідає кількості звернень до пулу: `/pickup` бере з'єднання 3 рази, тож чекає до 3 × 2 с; `/parcels` впирається в одне очікування 2 с | `for p in /parcels /pickup; do printf '%s ' $p; grep '"status":503' incident/logs/api-2026-10-14.jsonl \| grep "\"path\":\"$p\"" \| grep -o '"ms":[0-9]*' \| cut -d: -f2 \| sort -n \| tail -1; done`; `grep -c 'pool.withConnection' <(sed -n 61,67p app/src/parcels.js)` | `/parcels 2008`, `/pickup 5607`; `3` |
 
 ## Що з даних НЕ є причиною — і чим це доведено
 

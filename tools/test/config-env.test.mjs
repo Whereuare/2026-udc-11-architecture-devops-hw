@@ -86,6 +86,30 @@ test("C5 SKIP when there is nothing to compare with", () => {
   assert.equal(run({ db: { image: "postgres:17.2", environment: { POSTGRES_DB: "x" } } }).status, "SKIP");
 });
 
+test("C5 FAIL, not a silent SKIP: the app image variable renamed to a neutral name", () => {
+  const neutral = "${APP_IMAGE:?not set}";
+  const r = run({
+    api: { ...api({ PORT: "8080", DATABASE_URL: "x", DB_POOL_SIZE: "20", LOG_LEVEL: "info" }), image: neutral },
+    db: { image: "postgres:17.2", environment: { POSTGRES_DB: "x" } },
+  });
+  assert.equal(r.status, "FAIL", r.message);
+  assert.match(r.message, /APP_IMAGE/);
+  assert.doesNotMatch(r.message, /\bdb\b/);
+});
+
+test("C5 FAIL, not a silent SKIP: config.js reads variables in a way the rule does not understand", () => {
+  const other = mkdtempSync(join(tmpdir(), "check-c5-destructure-"));
+  try {
+    mkdirSync(join(other, "app", "src"), { recursive: true });
+    writeFileSync(join(other, "app", "src", "config.js"),
+      "export function loadConfig() { const { PORT, DB_POOL_MAX } = process.env; return { PORT, DB_POOL_MAX }; }\n");
+    const r = C5.check({ root: other, compose: { exists: true, data: { services: { api: api({ PORT: "8080" }) } } } });
+    assert.equal(r.status, "FAIL", r.message);
+  } finally {
+    rmSync(other, { recursive: true, force: true });
+  }
+});
+
 test("C5 on this repo: deploy/compose.yaml matches app/src/config.js", () => {
   const r = C5.check(loadContext(REPO));
   assert.equal(r.status, "PASS", r.message);

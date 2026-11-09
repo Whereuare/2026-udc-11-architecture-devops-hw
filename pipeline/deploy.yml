@@ -260,6 +260,12 @@ jobs:
           cd "$1"
           want_image="$2"
 
+          # Validate the new files and pull the images while the running release's files are still in place:
+          # if either fails, set -e stops here, .env and compose.yaml on disk still match the running
+          # containers, and the Clean up step removes .env.new.
+          docker compose -f compose.yaml.new --env-file .env.new config --quiet
+          docker compose -f compose.yaml.new --env-file .env.new pull --quiet api worker
+
           # Save the current release so we can roll back to it.
           rm -f .env.prev compose.yaml.prev
           [ -f .env ]         && cp -p .env .env.prev
@@ -270,10 +276,24 @@ jobs:
           # Start everything, then wait for the api to become healthy and check the worker is running.
           # Not a plain `up --wait`: it exits 1 on a service whose healthcheck is disabled (the worker
           # has no HTTP server), so every deploy would roll back. Found in Task E, Docker Compose v2.33.
+          # The worker has no healthcheck and restarts on crash (restart: unless-stopped), so a single
+          # `ps --status running` can catch it between two crashes. Require it to stay running for 30 s
+          # with no restarts in that window.
+          worker_stable() {
+            local id restarts
+            id="$(docker compose ps -q worker)"
+            [ -n "$id" ] || return 1
+            restarts="$(docker inspect -f '{{.RestartCount}}' "$id")"
+            sleep 30
+            [ "$(docker inspect -f '{{.State.Status}}' "$id")" = running ] \
+              && [ "$(docker inspect -f '{{.RestartCount}}' "$id")" = "$restarts" ] \
+              || { echo "::error::worker is not running steadily (restarts: $(docker inspect -f '{{.RestartCount}}' "$id" 2>/dev/null))"; return 1; }
+          }
+
           start_and_wait() {
             docker compose up -d --remove-orphans \
               && docker compose up -d --wait --wait-timeout 120 --no-recreate api \
-              && [ -n "$(docker compose ps -q --status running worker)" ]
+              && worker_stable
           }
 
           rollback() {
@@ -292,8 +312,6 @@ jobs:
             exit 1
           }
 
-          docker compose config --quiet
-          docker compose pull --quiet api worker
           start_and_wait || rollback
 
           # Make sure exactly the image we built is running.
