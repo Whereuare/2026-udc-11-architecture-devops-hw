@@ -17,14 +17,14 @@
 | 4 | Уся інфраструктура — не більше 60 €/міс; більше лише окремим рішенням виконкому, засідання у березні | `materials/budget.md:29-31` | ні — бюджет не згадано; "adds no new infrastructure" вкладається в ліміт випадково | так — вартість порівнюється у варіантах; "Infrastructure stays at about €5 of the €60 limit" | Розглянуті варіанти; Наслідки → Ціна і ризики |
 | 5 | Номер телефону зберігається й обробляється лише в ЄС: БД, черга, логи, будь-який сервіс, через який він проходить | `materials/compliance.md:11-13` | ні — про ЄС нічого, вибір сервісів на це не зважає | так — "phone numbers stay in `parcels` alone"; "logs and alerts contain `parcel_id` only"; розташування сервісів винесено до DPO | Розглянуті варіанти; Рішення |
 | 6 | Двоє розробників, лише compose/systemd/cron, без досвіду Kubernetes у продакшні, один черговий: відпадає те, що команда не зможе підтримувати | `materials/team.md:10-13` | ні — брокер відкинуто через залежності й "Unjustified at 5 SMS/s", не через команду | так — "New service sharing 4 GB of RAM, for one on-call person"; "New skills, IAM" | Розглянуті варіанти |
-| 7 | Ліміт 10 SMS/с, понад нього 429 з `Retry-After` і SMS не надсилається; посилки приходять партіями по 200–300 за кілька хвилин: потрібні черга, обмеження темпу й обробка 429 | `materials/vendors/sms-provider.md:16-17`, `materials/feature-brief.md:44-45` | ні — ліміту не знає; повтор при 429 загальний, без `Retry-After` | так — темп в одному процесі, "honouring `Retry-After`". Прогалина: припускає 5/с, а в `deploy/compose.yaml:20` стоїть 20 | Рішення; Наслідки → Що треба зробити |
+| 7 | Ліміт 10 SMS/с, понад нього 429 з `Retry-After` і SMS не надсилається; посилки приходять партіями по 200–300 за кілька хвилин: потрібні черга, обмеження темпу й обробка 429 | `materials/vendors/sms-provider.md:16-17`, `materials/feature-brief.md:44-45` | ні — ліміту не знає; повтор при 429 загальний, без `Retry-After` | так — темп в одному процесі, "honouring `Retry-After`". Прогалина: припускає 5/с, а в `main:deploy/compose.yaml:20` стоїть 20 | Рішення; Наслідки → Що треба зробити |
 | 8 | Ідемпотентності немає: повторний запит — нове SMS і новий рахунок, тому сліпі повтори відпадають і треба вирішити, що робити з SMS, чий результат невідомий | `materials/vendors/sms-provider.md:18-19` | так (спірно) — "If it doesn't, arrival SMS: resend once"; запасна гілка відповідає реальній поведінці, хоча саму ідемпотентність прогін вважає невідомою | так — "a queue can't make a non-idempotent provider exactly-once"; стан `in_doubt`, різна поведінка для прибуття і нагадувань | Рішення; Наслідки → Ціна і ризики |
 | 9 | Код не губиться при падінні процесу, і та сама людина не отримує той самий код двічі: таймери в пам'яті відпадають, стан надсилання треба зберігати | `materials/feature-brief.md:34-35` | ні — втрату розглянуто, але рішення суперечить другій частині: "Reminders do include the code" | так — нагадування без коду; "we choose a possible duplicate" лише в сумнівному випадку. Слабке місце: "up to 3 times" | Рішення; Наслідки → Ціна і ризики |
 | 10 | Тексти SMS погоджує комунікаційна команда: перед запуском потрібне погодження | `materials/feature-brief.md:37` | так* — "reminders can't launch until the communications team approves the wording" | так — окремий пункт перед реалізацією: "Final wording for the reminder and repeat SMS" | Наслідки → Що треба зробити |
 | 11 | Лише SMS; push, застосунок і продовження зберігання поза межами: інші канали й продовження терміну як реакція на збій відпадають | `materials/feature-brief.md:15-16`, `materials/feature-brief.md:51-53` | ні — не згадано, рішення на це не зважає | так — "the return still goes ahead, because extending storage is out of scope" | Контекст; Наслідки → Ціна і ризики |
 | 12 | Коди в адмінці не показуються, номери маскуються: відновити код через адмінку не можна | `materials/compliance.md:18` | ні — не згадано | так — "can't recover the code, because the admin view hides it" (записано у припущеннях, але за змістом це наслідок) | Наслідки → Ціна і ризики |
 
-Колонка «Де у вашому ADR» — поки план: `docs/adr/0001-notifications.md` ще не заповнений.
+Колонка «Де у вашому ADR» — розділи `docs/adr/0001-notifications.md`. Посилання `main:deploy/compose.yaml:N` — на стан до Task D: `git show main:deploy/compose.yaml | sed -n Np`.
 
 `*` Прогін 1 знав це лише тому, що прочитав бриф, якого не мав бачити (див. нижче).
 
@@ -81,7 +81,7 @@
 **Прогін 2**
 
 - Неправильне припущення про темп: "production runs a single worker at about 5 SMS/s". У
-  `deploy/compose.yaml:20` і `deploy/compose.yaml:34` стоїть `SMS_RATE_PER_SEC: "20"`, удвічі
+  `main:deploy/compose.yaml:20` і `main:deploy/compose.yaml:34` стоїть `SMS_RATE_PER_SEC: "20"`, удвічі
   більше за ліміт. Цієї теки прогін не бачив і назвав це припущенням, але висновок про
   60 секунд на 300 SMS через це не підтверджений.
 - Обмеження враховано неповно: "Resend after 5 minutes with an agreed "repeat message"

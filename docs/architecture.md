@@ -92,12 +92,12 @@ flowchart LR
 | Р10 | cron → Нічна задача: запуск о 03:15 | `app/bin/expire-parcels.js:2`, `app/package.json:11`, `docs/ops/backup-runbook.md:18-19` | пропустив — "the docs don't say what triggers the job" | пропустив — "cron on the VM" є лише підписом, стрілки немає |
 
 **PostgreSQL:** у репо сховище працює в пам'яті. PostgreSQL на стрілках Р5–Р7 підтверджують
-`app/src/db.js:1-2`, `app/README.md:23-24` і `deploy/compose.yaml:2`, але не код: `dbUrl`
+`app/src/db.js:1-2`, `app/README.md:23-24` і `main:deploy/compose.yaml:2`, але не код: `dbUrl`
 завантажується (`app/src/config.js:7`), проте не використовується.
 
 **Стрілок, яких немає, хоча їх легко припустити:**
 
-- **API → SMS-провайдер:** `deploy/compose.yaml:18-20` передає API налаштування SMS, але
+- **API → SMS-провайдер:** `main:deploy/compose.yaml:18-20` передає API налаштування SMS, але
   `app/src/server.js` не створює SMS-клієнта.
 - **API ↔ Worker:** прямого зв'язку немає, вони спільно працюють лише через БД.
 - **SMS-провайдер → API:** маршруту для вебхука немає (`app/src/server.js:36-52`).

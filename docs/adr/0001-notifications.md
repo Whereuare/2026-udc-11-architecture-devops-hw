@@ -30,10 +30,10 @@
 |---|---|
 | `app/src/worker.js:28-33` | SMS надсилається до запису `notifiedAt`; падіння між ними дає дубль |
 | `app/src/sms.js:31-41` | Немає таймауту, `Retry-After` ігнорується |
-| `deploy/compose.yaml:20`, `deploy/compose.yaml:34` | `SMS_RATE_PER_SEC: "20"`, удвічі більше за ліміт провайдера |
+| `main:deploy/compose.yaml:20`, `main:deploy/compose.yaml:34` | `SMS_RATE_PER_SEC: "20"`, удвічі більше за ліміт провайдера |
 | `app/bin/expire-parcels.js:14-15` | Посилку позначено поверненою до виклику кур'єра; помилка зупиняє весь цикл |
 | `app/src/parcels.js:61-66` | Видача читає й оновлює окремо, без перевірки статусу |
-| `app/src/worker.js:58-66`, `deploy/compose.yaml:23-35` | `stopping` перевіряється лише між партіями; немає `restart` і `stop_grace_period` |
+| `app/src/worker.js:58-66`, `main:deploy/compose.yaml:23-35` | `stopping` перевіряється лише між партіями; немає `restart` і `stop_grace_period` |
 
 **Припущення:**
 
