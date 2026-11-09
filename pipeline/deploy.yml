@@ -267,6 +267,15 @@ jobs:
           install -m 600 .env.new .env && rm -f .env.new
           mv -f compose.yaml.new compose.yaml
 
+          # Start everything, then wait for the api to become healthy and check the worker is running.
+          # Not a plain `up --wait`: it exits 1 on a service whose healthcheck is disabled (the worker
+          # has no HTTP server), so every deploy would roll back. Found in Task E, Docker Compose v2.33.
+          start_and_wait() {
+            docker compose up -d --remove-orphans \
+              && docker compose up -d --wait --wait-timeout 120 --no-recreate api \
+              && [ -n "$(docker compose ps -q --status running worker)" ]
+          }
+
           rollback() {
             echo "::error::new release did not become healthy; rolling back"
             docker compose ps || true
@@ -274,7 +283,7 @@ jobs:
             if [ -f .env.prev ] && [ -f compose.yaml.prev ]; then
               mv -f .env.prev .env
               mv -f compose.yaml.prev compose.yaml
-              docker compose up -d --wait --wait-timeout 120 --remove-orphans \
+              start_and_wait \
                 && echo "previous release restored" \
                 || echo "::error::rollback did not become healthy either — manual intervention needed"
             else
@@ -285,7 +294,7 @@ jobs:
 
           docker compose config --quiet
           docker compose pull --quiet api worker
-          docker compose up -d --wait --wait-timeout 120 --remove-orphans || rollback
+          start_and_wait || rollback
 
           # Make sure exactly the image we built is running.
           for svc in api worker; do

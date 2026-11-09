@@ -9,7 +9,8 @@
 # Compose reads `.env` automatically; a missing variable stops `up` with an error
 # instead of starting with an empty token / the default localhost database.
 #
-# Manual run (from this directory):  docker compose up -d --wait
+# Manual run (from this directory):  docker compose up -d && docker compose up -d --wait --no-recreate api
+#   (a plain `up --wait` exits 1: the worker's healthcheck is disabled)
 # Nightly job (cron on the VM):     docker compose --profile jobs run --rm expire
 
 name: poshtomat

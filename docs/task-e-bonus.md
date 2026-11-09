@@ -1,56 +1,79 @@
 # Task E (bonus) — оберіть ОДИН шлях
 
-> Скопіюйте у `docs/task-e-bonus.md` і заповніть лише обраний розділ.
-> Приклади курсивом — з **іншої** системи (онлайн-запис до клініки).
+Обрано **шлях 1 — стек по-справжньому (Docker)**. Шляхи 2 і 3 не виконувались.
 
 ## Шлях 1 — стек по-справжньому (Docker)
+
+Середовище: macOS, Docker Engine 28.0.1, Docker Compose v2.33.1 (Docker Desktop), 2026-11-09.
+Конфігурація — `deploy/Dockerfile` і `deploy/compose.yaml` після Task D.
 
 - Команди, якими підняли стек (змінні — у команді, не в закоміченому `.env`):
 
   ```bash
-  <...>
+  # 1. Образ. У compose немає build: — у продакшні образ приходить з pipeline за digest
+  #    через POSHTOMAT_IMAGE, тож локально збираємо його окремо.
+  docker build -f deploy/Dockerfile -t poshtomat:local app
+
+  # 2. Змінні, яких вимагає compose (${VAR:?…}). Сховище в репо — у пам'яті,
+  #    тож DATABASE_URL лише має бути заданий; адреса — з RFC 5737, пароль — CHANGE_ME.
+  export POSHTOMAT_IMAGE=poshtomat:local
+  export DATABASE_URL=postgres://poshtomat:CHANGE_ME@192.0.2.10:5432/poshtomat
+  export SMS_TOKEN=CHANGE_ME
+
+  # 3. Старт: усі сервіси, потім чекаємо healthy від api і перевіряємо, що worker працює.
+  docker compose -f deploy/compose.yaml up -d --remove-orphans
+  docker compose -f deploy/compose.yaml up -d --wait --wait-timeout 120 --no-recreate api
+  test -n "$(docker compose -f deploy/compose.yaml ps -q --status running worker)" && echo "worker running"
+
+  docker compose -f deploy/compose.yaml ps
+
+  # Зупинити:
+  docker compose -f deploy/compose.yaml down
   ```
 
-- Вивід `docker compose -f deploy/compose.yaml ps` — `api` `healthy`; `worker` `healthy` або
-  `Up`, якщо перевірку для нього вимкнено (тоді одним реченням — чому):
+- Вивід `docker compose -f deploy/compose.yaml ps`:
 
   ```text
-  <...>
+  NAME                 IMAGE             COMMAND                  SERVICE   CREATED          STATUS                    PORTS
+  poshtomat-api-1      poshtomat:local   "docker-entrypoint.s…"   api       25 seconds ago   Up 25 seconds (healthy)   0.0.0.0:8080->8080/tcp
+  poshtomat-worker-1   poshtomat:local   "docker-entrypoint.s…"   worker    25 seconds ago   Up 25 seconds             8080/tcp
   ```
 
-- Запит до `GET /health` і відповідь: <...>
-- Що пішло не так і як полагодили: <...>
+  `api` — `healthy`: `HEALTHCHECK` з образу робить `GET /health` через `node -e fetch(...)`.
+  `worker` — `Up` без перевірки: у нього немає HTTP-сервера, тож HTTP-перевірка образу завжди
+  показувала б `unhealthy`, а іншого сигналу здоров'я без змін в `app/` немає, тому в compose для
+  нього `healthcheck: disable: true`. `8080/tcp` у worker — лише `EXPOSE` з образу, порт не
+  опубліковано.
 
-## Шлях 2 — STRIDE для архітектури з вашого ADR
+- Запит до `GET /health` і відповідь:
 
-Чотири питання Адама Шостака.
+  ```text
+  $ curl -i http://localhost:8080/health
+  HTTP/1.1 200 OK
+  {"status":"ok","version":"1.7.3"}
+  ```
 
-1. **Над чим ми працюємо?** <компоненти, потоки даних і межі довіри — можна послатися на
-   `docs/architecture.md` і `docs/adr/0001-notifications.md`>
-2. **Що може піти не так?** і 3. **Що ми з цим робитимемо?**
+  Посилення з Task D справді діє: обидва контейнери працюють як `node:node` з read-only
+  файловою системою (`docker inspect -f '{{.Config.User}} {{.HostConfig.ReadonlyRootfs}}'` →
+  `node:node true`). У логах `service started` і `worker started` без помилок.
 
-| # | Елемент або потік | STRIDE | Загроза | Що робимо | Залишковий ризик |
-|---|---|---|---|---|---|
-| 1 | <...> | <S / T / R / I / D / E> | <...> | <...> | <...> |
+- Що пішло не так і як полагодили:
 
-_Приклад: «1 | Пацієнт → API: перегляд запису | I (Information disclosure) | чужий запис
-за ID, який легко вгадати | перевірка, що запис належить сесії, + непередбачувані ID |
-низький»._
+  1. **`docker compose up -d --wait` завершується з кодом 1, хоча стек здоровий.** Compose
+     v2.33 пише `container poshtomat-worker-1 has no healthcheck configured` і вважає це
+     помилкою, бо для worker перевірку вимкнено. Саме цю команду використовував
+     `pipeline/deploy.yml` (`docker compose up -d --wait … || rollback`), тож **кожен деплой
+     відкочувався б**, навіть коли все працює, а `check:deploy` цього не бачить: правила
+     статичні.
+     **Як полагодили:** у `pipeline/deploy.yml` замість одного `up --wait` тепер функція
+     `start_and_wait`: `up -d --remove-orphans` для всіх сервісів, потім
+     `up -d --wait --no-recreate api` (чекає `healthy` лише від api), потім перевірка, що
+     worker у стані `running`. Вона ж використовується для відкату. Коментар у шапці
+     `deploy/compose.yaml` оновлено.
+     **Перевірено обидва випадки:** здоровий стек → код 0; api з навмисно зламаним
+     healthcheck (override-файл з `process.exit(1)`) → `container poshtomat-api-1 is unhealthy`,
+     код 1, тобто відкат спрацював би.
+  2. **`--build` з прикладу в завданні не підходить:** у compose немає `build:`, бо образ
+     приходить за digest. Образ збираємо окремою командою `docker build` (крок 1).
 
-S — Spoofing, T — Tampering, R — Repudiation, I — Information disclosure,
-D — Denial of service, E — Elevation of privilege.
-
-4. **Чи добре ми впоралися?** <що перевірили, що свідомо лишили, коли переглянути модель>
-
-## Шлях 3 — оцінка вартості
-
-| Компонент з ADR | Сервіс і тариф | Ціна за одиницю | Джерело (посилання, дата перевірки) | Обсяг на місяць (припущення) | Сума на місяць |
-|---|---|---|---|---|---|
-| <...> | <...> | <...> | <...> | <...> | <...> |
-
-_Приклад: «Сховище сканів | об'єктне сховище, стандартний клас | <ціна за ГБ-місяць> |
-<посилання на сторінку тарифів>, перевірено <дата> | 120 ГБ | <сума>»._
-
-**Разом на місяць:** <…>
-**Звідки обсяги:** <...>
-**Що найбільше впливає на суму і як її зменшити:** <...>
+  Після змін: `npm run check:deploy` — PASS 14, FAIL 0; `npm run test:tools` — 27 з 27.
