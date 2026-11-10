@@ -277,17 +277,20 @@ jobs:
           # Not a plain `up --wait`: it exits 1 on a service whose healthcheck is disabled (the worker
           # has no HTTP server), so every deploy would roll back. Found in Task E, Docker Compose v2.33.
           # The worker has no healthcheck and restarts on crash (restart: unless-stopped), so a single
-          # `ps --status running` can catch it between two crashes. Require it to stay running for 30 s
-          # with no restarts in that window.
+          # `ps --status running` can catch it between two crashes. Require it to be running at the start
+          # of a 30 s window (not waiting in a restart back-off) and to stay running with no restarts in it.
+          # State and restart count are read together, so the start snapshot is consistent.
           worker_stable() {
-            local id restarts
+            local id before after
             id="$(docker compose ps -q worker)"
-            [ -n "$id" ] || return 1
-            restarts="$(docker inspect -f '{{.RestartCount}}' "$id")"
+            [ -n "$id" ] || { echo "::error::worker container not found"; return 1; }
+            before="$(docker inspect -f '{{.State.Status}} {{.RestartCount}}' "$id")" || return 1
+            [ "${before%% *}" = running ] \
+              || { echo "::error::worker is not running (status, restarts: $before)"; return 1; }
             sleep 30
-            [ "$(docker inspect -f '{{.State.Status}}' "$id")" = running ] \
-              && [ "$(docker inspect -f '{{.RestartCount}}' "$id")" = "$restarts" ] \
-              || { echo "::error::worker is not running steadily (restarts: $(docker inspect -f '{{.RestartCount}}' "$id" 2>/dev/null))"; return 1; }
+            after="$(docker inspect -f '{{.State.Status}} {{.RestartCount}}' "$id")" || return 1
+            [ "$after" = "$before" ] \
+              || { echo "::error::worker is not running steadily (status, restarts: $before → $after)"; return 1; }
           }
 
           start_and_wait() {

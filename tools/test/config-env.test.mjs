@@ -87,14 +87,17 @@ test("C5 SKIP when there is nothing to compare with", () => {
 });
 
 test("C5 FAIL, not a silent SKIP: the app image variable renamed to a neutral name", () => {
-  const neutral = "${APP_IMAGE:?not set}";
-  const r = run({
-    api: { ...api({ PORT: "8080", DATABASE_URL: "x", DB_POOL_SIZE: "20", LOG_LEVEL: "info" }), image: neutral },
-    db: { image: "postgres:17.2", environment: { POSTGRES_DB: "x" } },
-  });
-  assert.equal(r.status, "FAIL", r.message);
-  assert.match(r.message, /APP_IMAGE/);
-  assert.doesNotMatch(r.message, /\bdb\b/);
+  for (const neutral of ["${APP_IMAGE:?not set}", "$APP_IMAGE"]) {
+    const r = run({
+      api: { ...api({ PORT: "8080", DATABASE_URL: "x", DB_POOL_SIZE: "20", LOG_LEVEL: "info" }), image: neutral },
+      db: { image: "postgres:17.2", environment: { POSTGRES_DB: "x" } },
+    });
+    assert.equal(r.status, "FAIL", `${neutral}: ${r.message}`);
+    assert.match(r.message, /APP_IMAGE/);
+    assert.doesNotMatch(r.message, /\bdb\b/);
+  }
+  // `$$` is an escaped literal `$`, not a variable: nothing to recognise, so SKIP as before.
+  assert.equal(run({ tool: { image: "registry.example.org/tool:$$x" } }).status, "SKIP");
 });
 
 test("C5 FAIL, not a silent SKIP: config.js reads variables in a way the rule does not understand", () => {

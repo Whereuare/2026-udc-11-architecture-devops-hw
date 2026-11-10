@@ -400,9 +400,11 @@ export function configVars(text) {
 // Services that run this app: built from the repo, or the poshtomat image. Third-party
 // services (a database, a proxy) have their own variables and are not checked.
 const isAppService = (svc) => Boolean(svc?.build) || /poshtomat/i.test(String(svc?.image ?? ""));
-// An image from a variable (${APP_IMAGE}) can be the app under a neutral name: if no app service is
-// recognised, these must not let the rule switch itself off silently.
-const imageFromVariable = (svc) => !svc?.build && String(svc?.image ?? "").includes("${");
+// An image from a variable (${APP_IMAGE} or $APP_IMAGE) can be the app under a neutral name: if no app
+// service is recognised, these must not let the rule switch itself off silently. `$$` is compose's
+// escape for a literal `$`, not a variable.
+const imageFromVariable = (svc) =>
+  !svc?.build && /\$(\{|[A-Za-z_])/.test(String(svc?.image ?? "").replaceAll("$$", ""));
 
 export const RULES = [
   {
